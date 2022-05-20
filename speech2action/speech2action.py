@@ -23,7 +23,7 @@ def stage_direction_to_verb(stage_directions):
     verb_list = []
     # idx = 0
     # stage direction 문장 하나씩 접근
-    for i in tqdm(stage_directions):
+    for i in tqdm(stage_directions): # 오래 걸려
         # if idx==5:
         #     print(verb_list[:5])
         #     break
@@ -77,6 +77,10 @@ def verb_preprocess(verbs):
     stopwords = [x for x in vocab_freq2.keys()]
 
     # 4. verbs([문장][v1, v2, ...])에서 stopwords만 통과시킴.
+    for i in tqdm(range(len(verbs))):
+        verbs[i] = [w for w in verbs[i] if w in stopwords]
+
+    # 5. 동사원형으로 -- 이어서
     for i in tqdm(range(len(verbs))):
         verbs[i] = [w for w in verbs[i] if w in stopwords]
 
@@ -150,8 +154,19 @@ stage_direction_list = stage_direction_to_verb(stage_direction_list)
 action_list = verb_preprocess(stage_direction_list)
 
 # Speech2Action training data 구조로 구성
-# 1. 결측값제거 https://rfriend.tistory.com/263
-# 2. 행 분리? ㅠ늘려주기 http://daplus.net/python-%ED%8C%AC%EB%8D%94-%EB%8D%B0%EC%9D%B4%ED%84%B0-%ED%94%84%EB%A0%88%EC%9E%84-%EB%AC%B8%EC%9E%90%EC%97%B4-%ED%95%AD%EB%AA%A9%EC%9D%84-%EB%B6%84%ED%95%A0%ED%95%98%EC%97%AC-%ED%96%89-%EB%B6%84/
-S2A = pd.DataFrame({'speech': action_list,
-                    'stage_direction': stage_direction_list})
+S2A = pd.DataFrame({'speech': speech_list,
+                    'actions': action_list})
+S2A.to_csv('S2A_IMSDb_to_check.csv', index=False) # 확인용
 
+# 1. 결측값 제거
+S2A_row = S2A.dropna(axis=0)
+print(S2A.shape, S2A_row.shape)
+
+# 2. 행 분리
+action = S2A_row['actions'].apply(lambda x : pd.Series(x))
+action = action.stack().reset_index(level=1, drop=True).to_frame('action')
+result = action.merge(S2A_row, left_index=True, right_index=True, how='left')
+result = result[['speech', 'action']]
+
+# result : [speech] [action] 구조의 dataframe. dataset 구성.
+result.to_csv('S2A_IMSDb.csv', index=False)
