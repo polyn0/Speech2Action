@@ -5,6 +5,17 @@ import numpy as np
 import re
 import pandas as pd
 from tqdm import tqdm
+
+# import nltk
+# nltk.download('omw-1.4')
+
+# from word_forms.lemmatizer import lemmatize
+# print(lemmatize('running'))
+
+from nltk.stem import WordNetLemmatizer
+# wnl = WordNetLemmatizer()
+# print(wnl.lemmatize('ran'), wnl.lemmatize('running'), wnl.lemmatize('brought'), wnl.lemmatize('washes'))
+
 import itertools
 nltk.download('punkt')
 nltk.download('averaged_perceptron_tagger')
@@ -72,26 +83,37 @@ def verb_preprocess(verbs):
             vocab_freq2[word] = frequency
     print(list(vocab_freq2.items())[-5:]) # 끝에 5단어 관찰
 
-    # 3-3) 통과할 verb들을 stopwords로 만듦.
+    # 3-3) 통과할 verb들을 okaywords 만듦. + 추가 stopwords 'coulda'
     print('비교!!! 100개도 아니고 50 이상 단어들.',len(vocab_freq2))
-    stopwords = [x for x in vocab_freq2.keys()]
+    okaywords = [x for x in vocab_freq2.keys()]
+    stopwords = ['coulda']
 
-    # 4. verbs([문장][v1, v2, ...])에서 stopwords만 통과시킴.
+    # 4. verbs([문장][v1, v2, ...])에서 okaywords만 통과시킴.
     for i in tqdm(range(len(verbs))):
-        verbs[i] = [w for w in verbs[i] if w in stopwords]
-
-    # 5. 동사원형으로 -- 이어서
-    for i in tqdm(range(len(verbs))):
-        verbs[i] = [w for w in verbs[i] if w in stopwords]
+        verbs[i] = [w for w in verbs[i] if w in okaywords and w not in stopwords]
 
     print('확인(문장개수)', len(verbs), '위에꺼랑 똑같이 나오는지 확인')
     return verbs
 
 
 def speech_preprocess(speechs) :
+    new_action = {}
     for i in range(len(speechs)):
-        speechs[i] = re.sub("[^a-zA-Z0-9\s]","", speechs[i])
-    return speechs
+
+        # 대사가 대문자인 경우는 적고, 대사가 아닌 경우가 대문자인 경우가 훨씬 많아 처리.
+        if speechs[i].isupper():
+            speechs[i] = None
+            continue
+
+        # new_action : 대사 바로 앞 지문 추가
+        if speechs[i].startswith("("):
+            new_action[i] = speechs[i][1:speechs[i].find(")")]
+            speechs[i] = speechs[i][speechs[i].find(")")+1:].lstrip()
+            #re.sub("[(]\w+[)]", "", "(what) I know better")
+
+        speechs[i] = re.sub("[^a-zA-Z0-9\s]","", speechs[i]) # 대소문자숫자만 통과 (기호 모두 불가)
+
+    return speechs, new_action
 
 
 def screenplay_parsing():
@@ -143,13 +165,14 @@ def screenplay_parsing():
 
 speech_list, stage_direction_list = screenplay_parsing()
 
-speech_list = speech_preprocess(speech_list)
-
 S2S = pd.DataFrame({'speech': speech_list,
                     'stage_direction': stage_direction_list})
 print(S2S.head)
 print(S2S.shape)
 
+
+speech_list, new_action = speech_preprocess(speech_list)
+print(new_action)
 stage_direction_list = stage_direction_to_verb(stage_direction_list)
 action_list = verb_preprocess(stage_direction_list)
 
@@ -167,6 +190,18 @@ action = S2A_row['actions'].apply(lambda x : pd.Series(x))
 action = action.stack().reset_index(level=1, drop=True).to_frame('action')
 result = action.merge(S2A_row, left_index=True, right_index=True, how='left')
 result = result[['speech', 'action']]
-
 # result : [speech] [action] 구조의 dataframe. dataset 구성.
-result.to_csv('S2A_IMSDb.csv', index=False)
+print(result.head())
+
+
+# 3. 동사 활용형 원형으로
+wnl = WordNetLemmatizer()
+result['lemmatize'] = [wnl.lemmatize(x, 'v') for x in result['action']]
+final_result = pd.DataFrame(columns=['speech', 'action'])
+final_result['speech'] = result['speech']
+final_result['action'] = result['lemmatize']
+final_result.drop_duplicates()
+print(final_result.head())
+print(final_result.describe())
+final_result.to_csv('S2A_IMSDb.csv', index=False)
+
