@@ -20,14 +20,8 @@ import itertools
 nltk.download('punkt')
 nltk.download('averaged_perceptron_tagger')
 
-from nltk import word_tokenize, pos_tag, ne_chunk, FreqDist
+from nltk import word_tokenize, pos_tag, FreqDist
 
-path_dir = './ParserOutput/Action'
-file_list = os.listdir(path_dir)
-# print(file_list)
-
-stage_direction_list = []
-speech_list = []
 
 
 def stage_direction_to_verb(stage_directions):
@@ -67,7 +61,7 @@ def verb_preprocess(verbs):
     # 2. vocab 빈도수로 변환 -> vocab_freq[(word, freq)]
     vocab_freq = FreqDist(vocab)
 
-    # 3. 빈도수 높은거 100개, 50보다 작은거 제거 -> ""통과한 거"" stopwords에 저장.
+    # 3. 빈도수 높은거 100개, 50보다 작은거 제거 -> ""통과한 거"" okaywords에 저장.
     # 빈도수 순으로 나열
     vocab_freq = vocab_freq.most_common()
 
@@ -96,36 +90,39 @@ def verb_preprocess(verbs):
     return verbs
 
 
-def speech_preprocess(speechs) :
+def speech_preprocess(speechs):
     new_action = {}
     for i in range(len(speechs)):
 
-        # 대사가 대문자인 경우는 적고, 대사가 아닌 경우가 대문자인 경우가 훨씬 많아 처리.
+        # 대사가 전부 대문자인 경우 제외
         if speechs[i].isupper():
             speechs[i] = None
             continue
 
-        # new_action : 대사 바로 앞 지문 추가
+        # new_action : 대사 바로 앞 지문
         if speechs[i].startswith("("):
             new_action[i] = speechs[i][1:speechs[i].find(")")]
-            speechs[i] = speechs[i][speechs[i].find(")")+1:].lstrip()
+            speechs[i] = speechs[i][speechs[i].find(")")+1:].strip()
             #re.sub("[(]\w+[)]", "", "(what) I know better")
 
-        speechs[i] = re.sub("[^a-zA-Z0-9\s]","", speechs[i]) # 대소문자숫자만 통과 (기호 모두 불가)
+        # 문장부호 제외 처리
+        speechs[i] = re.sub("[^a-zA-Z0-9\s]","", speechs[i]).strip()
 
     return speechs, new_action
 
 
-def screenplay_parsing():
+def screenplay_parsing(path):
     # total_verb = []
-
+    speech_l = []
+    stage_direction_l=[]
+    file_list = os.listdir(path)
     for i in file_list:
         if i.endswith('.pkl'):
             continue
-        with open(path_dir + '/' + i, 'r') as f:
+        with open(path + '/' + i, 'r') as f:
             dic = json.load(f)
             # print(len(dic))
-            print('Opening!', i)
+            # print('Opening!', i)
 
         # 대본.json 들어가서 EXT/INT 로 나뉜 거 하나씩 접근
         for j in range(len(dic)):
@@ -146,16 +143,16 @@ def screenplay_parsing():
                     if stage_direction == None:
                         continue
 
-                    stage_direction_list.append(stage_direction)
-                    speech_list.append(speech)
+                    stage_direction_l.append(stage_direction)
+                    speech_l.append(speech)
 
     # 장르 1개(대본 n개)에 대한 stage direction - speech set
-    print(len(stage_direction_list), len(speech_list))
-    return stage_direction_list, speech_list
-    # stage_direction_list, speech_list 저장.
+    print(len(stage_direction_l), len(speech_l))
+    return stage_direction_l, speech_l
+    # stage_direction_l, speech_l 저장.
 
     #     # total_verb [대본][stagedirection문장][verb]
-    #     total_verb.append(stage_direction_to_verb(stage_direction_list))
+    #     total_verb.append(stage_direction_to_verb(stage_direction_l))
     #
     #     break
     # print('대본개수', len(total_verb), len(file_list) / 2)
@@ -163,23 +160,52 @@ def screenplay_parsing():
 
 
 
-speech_list, stage_direction_list = screenplay_parsing()
+path_dir = './ParserOutput/'
+genre_list = os.listdir(path_dir)
+
+# file_list = os.listdir(path_dir)
+speech_list = []
+stage_direction_list = []
+for i in genre_list:
+    speechs, stage_directions = screenplay_parsing(path_dir + i)
+    speech_list += speechs
+    stage_direction_list += stage_directions
+    print('genre:', i, len(speechs), len(stage_directions), "cum:", len(stage_direction_list), len(speech_list))
+
+# # # genre 1개 사용할 때
+# path_dir = './ParserOutput/Action'
+# file_list = os.listdir(path_dir)
+# # # print(file_list)
+# # speech_list, stage_direction_list = screenplay_parsing(path_dir)
+
+
 
 S2S = pd.DataFrame({'speech': speech_list,
                     'stage_direction': stage_direction_list})
+S2S.to_csv('S2A_speech_sd.csv', index=False) # 확인용
 print(S2S.head)
 print(S2S.shape)
 
 
 speech_list, new_action = speech_preprocess(speech_list)
 print(new_action)
+
+# 대사에 포함된 지시문 있는 경우 고려
+for key, value in new_action.items():
+    # print(key, value)
+    stage_direction_list[key] = value
+
+
+
+
 stage_direction_list = stage_direction_to_verb(stage_direction_list)
+
 action_list = verb_preprocess(stage_direction_list)
 
 # Speech2Action training data 구조로 구성
 S2A = pd.DataFrame({'speech': speech_list,
                     'actions': action_list})
-S2A.to_csv('S2A_IMSDb_to_check.csv', index=False) # 확인용
+S2A.to_csv('S2A_speech_actions.csv', index=False) # 확인용
 
 # 1. 결측값 제거
 S2A_row = S2A.dropna(axis=0)
@@ -203,5 +229,5 @@ final_result['action'] = result['lemmatize']
 final_result.drop_duplicates()
 print(final_result.head())
 print(final_result.describe())
-final_result.to_csv('S2A_IMSDb.csv', index=False)
+final_result.to_csv('S2A_speech_action.csv', index=False)
 
